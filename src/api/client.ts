@@ -7,8 +7,10 @@ import type {
 } from '../types/api'
 import { ApiError } from '../types/api'
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '')
-  ?? 'http://localhost:8000'
+const API_URL = (
+  (import.meta.env.VITE_API_URL as string | undefined)
+  ?? (import.meta.env.PROD ? 'https://fapi-orders.onrender.com' : 'http://localhost:8000')
+).replace(/\/$/, '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
