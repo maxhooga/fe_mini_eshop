@@ -33,6 +33,13 @@
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #f9fafb;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.status--loading {
+  color: #374151;
 }
 
 .status--error {
@@ -41,9 +48,58 @@
   color: #b91c1c;
 }
 
+.status__spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid #d1d5db;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.status__spinner--light {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.secondary-button {
+  height: 2.5rem;
+  padding: 0 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.secondary-button:hover {
+  background: #f9fafb;
+}
+
 .order-form {
   display: grid;
   gap: 1.75rem;
+}
+
+.order-form--busy {
+  opacity: 0.92;
 }
 
 .order-form__group h2 {
@@ -248,6 +304,10 @@
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
 }
 
 .order-form__submit:hover:not(:disabled) {

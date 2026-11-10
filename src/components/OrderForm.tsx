@@ -1,6 +1,7 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createOrder } from '../api/client'
+import { getErrorMessage } from '../lib/errors'
 import { formatCzk } from '../lib/money'
 import { calculateOrderTotals } from '../lib/pricing'
 import {
@@ -52,6 +53,7 @@ function mapApiFieldErrors(fieldErrors: Record<string, string>): OrderFormErrors
 
 export function OrderForm({ products }: Props) {
   const navigate = useNavigate()
+  const submitControllerRef = useRef<AbortController | null>(null)
   const [values, setValues] = useState<OrderFormValues>({
     customerName: '',
     customerEmail: '',
@@ -64,6 +66,12 @@ export function OrderForm({ products }: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [touchedSubmit, setTouchedSubmit] = useState(false)
+
+  useEffect(() => {
+    return () => {
+      submitControllerRef.current?.abort()
+    }
+  }, [])
 
   const availableProducts = useMemo(() => {
     const used = new Set(values.items.map((item) => item.productId))
@@ -145,38 +153,60 @@ export function OrderForm({ products }: Props) {
     const nextErrors = validateOrderForm(values)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) {
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+      })
       return
     }
 
+    submitControllerRef.current?.abort()
+    const controller = new AbortController()
+    submitControllerRef.current = controller
+
     setSubmitting(true)
     try {
-      const order = await createOrder({
-        customerName: values.customerName.trim(),
-        customerEmail: values.customerEmail.trim(),
-        customerPhone: values.customerPhone.trim(),
-        items: values.items.map((item) => ({
-          productId: Number(item.productId),
-          quantity: Number(item.quantity),
-        })),
-      })
+      const order = await createOrder(
+        {
+          customerName: values.customerName.trim(),
+          customerEmail: values.customerEmail.trim(),
+          customerPhone: values.customerPhone.trim(),
+          items: values.items.map((item) => ({
+            productId: Number(item.productId),
+            quantity: Number(item.quantity),
+          })),
+        },
+        controller.signal,
+      )
       navigate(`/thank-you/${order.id}`)
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
       if (err instanceof ApiError) {
         const mapped = mapApiFieldErrors(err.fieldErrors)
         if (Object.keys(mapped).length > 0) {
           setErrors(mapped)
+          window.requestAnimationFrame(() => {
+            document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+          })
         }
-        setSubmitError(err.message)
-      } else {
-        setSubmitError('Objednávku se nepodařilo odeslat.')
       }
+      setSubmitError(getErrorMessage(err, 'Objednávku se nepodařilo odeslat.'))
     } finally {
+      if (submitControllerRef.current === controller) {
+        submitControllerRef.current = null
+      }
       setSubmitting(false)
     }
   }
 
   return (
-    <form className="order-form" onSubmit={handleSubmit} noValidate>
+    <form
+      className={`order-form${submitting ? ' order-form--busy' : ''}`}
+      onSubmit={handleSubmit}
+      noValidate
+      aria-busy={submitting}
+    >
       <div className="order-form__group">
         <h2>Osobní údaje</h2>
 
@@ -345,10 +375,21 @@ export function OrderForm({ products }: Props) {
         )}
       </div>
 
-      {submitError && <p className="status status--error">{submitError}</p>}
+      {submitError && (
+        <p className="status status--error" role="alert">
+          {submitError}
+        </p>
+      )}
 
       <button type="submit" className="order-form__submit" disabled={submitting}>
-        {submitting ? 'Odesílám…' : 'Odeslat objednávku'}
+        {submitting ? (
+          <>
+            <span className="status__spinner status__spinner--light" aria-hidden="true" />
+            Odesílám…
+          </>
+        ) : (
+          'Odeslat objednávku'
+        )}
       </button>
     </form>
   )

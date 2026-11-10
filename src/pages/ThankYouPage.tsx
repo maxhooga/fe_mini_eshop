@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getOrder } from '../api/client'
+import { ErrorState, LoadingState } from '../components/AsyncState'
+import { getErrorMessage } from '../lib/errors'
 import { formatCzk, formatMoney } from '../lib/money'
-import { ApiError } from '../types/api'
 import type { Order } from '../types/api'
 
 export function ThankYouPage() {
@@ -11,38 +12,46 @@ export function ThankYouPage() {
   const [order, setOrder] = useState<Order | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  const retry = useCallback(() => {
+    setReloadKey((value) => value + 1)
+  }, [])
 
   useEffect(() => {
-    let cancelled = false
-
     if (!Number.isInteger(id) || id < 1) {
+      setOrder(null)
       setError('Neplatné číslo objednávky.')
       setLoading(false)
       return
     }
 
-    getOrder(id)
+    const controller = new AbortController()
+    setLoading(true)
+    setError(null)
+
+    getOrder(id, controller.signal)
       .then((data) => {
-        if (!cancelled) {
-          setOrder(data)
-          setError(null)
-        }
+        setOrder(data)
+        setError(null)
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : 'Objednávku se nepodařilo načíst.')
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return
         }
+        setOrder(null)
+        setError(getErrorMessage(err, 'Objednávku se nepodařilo načíst.'))
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoading(false)
         }
       })
 
     return () => {
-      cancelled = true
+      controller.abort()
     }
-  }, [id])
+  }, [id, reloadKey])
 
   return (
     <main className="page">
@@ -53,14 +62,14 @@ export function ThankYouPage() {
         </p>
       </header>
 
-      {loading && <p className="status">Načítám objednávku…</p>}
-      {error && (
-        <div className="stack">
-          <p className="status status--error">{error}</p>
+      {loading && <LoadingState label="Načítám objednávku…" />}
+
+      {!loading && error && (
+        <ErrorState message={error} onRetry={Number.isInteger(id) && id >= 1 ? retry : undefined}>
           <Link className="text-link" to="/">
             Zpět na formulář
           </Link>
-        </div>
+        </ErrorState>
       )}
 
       {order && (
