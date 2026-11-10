@@ -1,4 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { createOrder } from '../api/client'
 import { formatCzk } from '../lib/money'
 import { calculateOrderTotals } from '../lib/pricing'
 import {
@@ -6,13 +8,50 @@ import {
   type OrderFormErrors,
   type OrderFormValues,
 } from '../lib/validation'
+import { ApiError } from '../types/api'
 import type { Product } from '../types/api'
 
 type Props = {
   products: Product[]
 }
 
+function mapApiFieldErrors(fieldErrors: Record<string, string>): OrderFormErrors {
+  const errors: OrderFormErrors = {}
+  const itemErrors: Array<{ quantity?: string }> = []
+
+  for (const [key, message] of Object.entries(fieldErrors)) {
+    if (key === 'customerName' || key === 'customerEmail' || key === 'customerPhone') {
+      errors[key] = message
+      continue
+    }
+
+    if (key === 'items') {
+      errors.items = message
+      continue
+    }
+
+    const match = /^items\.(\d+)\.(productId|quantity)$/.exec(key)
+    if (match) {
+      const index = Number(match[1])
+      const field = match[2]
+      itemErrors[index] ??= {}
+      if (field === 'quantity') {
+        itemErrors[index].quantity = message
+      } else {
+        errors.items = message
+      }
+    }
+  }
+
+  if (itemErrors.length > 0) {
+    errors.itemErrors = itemErrors
+  }
+
+  return errors
+}
+
 export function OrderForm({ products }: Props) {
+  const navigate = useNavigate()
   const [values, setValues] = useState<OrderFormValues>({
     customerName: '',
     customerEmail: '',
@@ -22,6 +61,8 @@ export function OrderForm({ products }: Props) {
   const [productToAdd, setProductToAdd] = useState('')
   const [addError, setAddError] = useState<string | null>(null)
   const [errors, setErrors] = useState<OrderFormErrors>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [touchedSubmit, setTouchedSubmit] = useState(false)
 
   const availableProducts = useMemo(() => {
@@ -96,10 +137,42 @@ export function OrderForm({ products }: Props) {
     revalidate(next)
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setTouchedSubmit(true)
-    setErrors(validateOrderForm(values))
+    setSubmitError(null)
+
+    const nextErrors = validateOrderForm(values)
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) {
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const order = await createOrder({
+        customerName: values.customerName.trim(),
+        customerEmail: values.customerEmail.trim(),
+        customerPhone: values.customerPhone.trim(),
+        items: values.items.map((item) => ({
+          productId: Number(item.productId),
+          quantity: Number(item.quantity),
+        })),
+      })
+      navigate(`/thank-you/${order.id}`)
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        const mapped = mapApiFieldErrors(err.fieldErrors)
+        if (Object.keys(mapped).length > 0) {
+          setErrors(mapped)
+        }
+        setSubmitError(err.message)
+      } else {
+        setSubmitError('Objednávku se nepodařilo odeslat.')
+      }
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -116,6 +189,7 @@ export function OrderForm({ products }: Props) {
             value={values.customerName}
             onChange={(event) => updateCustomer('customerName', event.target.value)}
             aria-invalid={Boolean(errors.customerName)}
+            disabled={submitting}
           />
           {errors.customerName && <em className="field__error">{errors.customerName}</em>}
         </label>
@@ -130,6 +204,7 @@ export function OrderForm({ products }: Props) {
               value={values.customerEmail}
               onChange={(event) => updateCustomer('customerEmail', event.target.value)}
               aria-invalid={Boolean(errors.customerEmail)}
+              disabled={submitting}
             />
             {errors.customerEmail && <em className="field__error">{errors.customerEmail}</em>}
           </label>
@@ -144,6 +219,7 @@ export function OrderForm({ products }: Props) {
               value={values.customerPhone}
               onChange={(event) => updateCustomer('customerPhone', event.target.value)}
               aria-invalid={Boolean(errors.customerPhone)}
+              disabled={submitting}
             />
             {errors.customerPhone && <em className="field__error">{errors.customerPhone}</em>}
           </label>
@@ -163,7 +239,7 @@ export function OrderForm({ products }: Props) {
                   setProductToAdd(event.target.value)
                   setAddError(null)
                 }}
-                disabled={availableProducts.length === 0}
+                disabled={availableProducts.length === 0 || submitting}
                 aria-invalid={Boolean(addError)}
               >
                 <option value="">
@@ -179,7 +255,7 @@ export function OrderForm({ products }: Props) {
                 type="button"
                 className="add-product__button"
                 onClick={addProduct}
-                disabled={availableProducts.length === 0}
+                disabled={availableProducts.length === 0 || submitting}
               >
                 Přidat
               </button>
@@ -222,6 +298,7 @@ export function OrderForm({ products }: Props) {
                       value={item.quantity}
                       onChange={(event) => updateQuantity(index, event.target.value)}
                       aria-invalid={Boolean(itemError?.quantity)}
+                      disabled={submitting}
                     />
                     {itemError?.quantity && <em className="field__error">{itemError.quantity}</em>}
                   </label>
@@ -231,6 +308,7 @@ export function OrderForm({ products }: Props) {
                     className="order-line__remove"
                     onClick={() => removeLine(index)}
                     aria-label={`Odebrat ${product?.name ?? 'produkt'}`}
+                    disabled={submitting}
                   >
                     Odebrat
                   </button>
@@ -267,8 +345,10 @@ export function OrderForm({ products }: Props) {
         )}
       </div>
 
-      <button type="submit" className="order-form__submit">
-        Ověřit formulář
+      {submitError && <p className="status status--error">{submitError}</p>}
+
+      <button type="submit" className="order-form__submit" disabled={submitting}>
+        {submitting ? 'Odesílám…' : 'Odeslat objednávku'}
       </button>
     </form>
   )
